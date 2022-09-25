@@ -1,5 +1,6 @@
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::{fs::File, io::Read};
 fn main() {
     let mut file = File::open("chars.txt").unwrap();
@@ -12,7 +13,7 @@ fn main() {
         '━', '┃', '┏', '┓', '┛', '┗', '┣', '┫', '┳', '┻', '╋', '╮', '╭', '╯', '╰',
     ];*/
 
-    let mut rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>> = HashMap::new();
+    let rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>> = HashMap::new();
     let in_board: Vec<Vec<char>> = contents.lines().map(|l| l.chars().collect()).collect();
     //let mut map: Vec<Vec<tile>> = Vec::new();
     let mut board = board::new(in_board.len() * in_board[0].len(), rules);
@@ -88,33 +89,36 @@ fn main() {
         println!("{:?}: {:?}", k, v);
     }
 
-    /*while map
-    .iter()
-    .flatten()
-    .filter(|e| e.position.len() > 0)
-    .collect::<Vec<&tile>>()
-    .len()
-    > 0*/
     while board.remaining > 0 {
-        //chose a tile to collapse
-        //let chosen = board.chose_tile_to_collapse();
-
-        //collapse it
-
-        //state = concatenate all neighbors allowed positions, and dedup, then chose at random
+        println!("collapsing");
         board.collapse();
-
-        //update its neighbors posibilities recursively
+        for row in &board.map {
+            for c in row {
+                print!("{}", c.rep);
+            }
+            print!("\n")
+        }
     }
+
+    /*for row in board.map {
+        for c in row {
+            print!("{}", c.rep);
+        }
+        println!("\n")
+    }*/
+    println!("{:?}", board.map);
 }
 
+//TODO: reconsider internalizing the map within this struct.
+//because it is a local variable, we cant pass around references to tiles within it without the borrow checker getting mad
+//so we instead have to refer to tiles by coords: (usize,usize)
 #[allow(non_camel_case_types)]
 struct board {
     map: Vec<Vec<tile>>,
     remaining: usize,
     rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>>,
 }
-impl<'a> board {
+impl board {
     fn new(size: usize, rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>>) -> Self {
         Self {
             map: Vec::new(),
@@ -123,21 +127,31 @@ impl<'a> board {
         }
     }
 
-    //one iteration of the collapse algorithm
-    fn collapse(&mut self) -> Vec<tile_type> {
+    //collapse a tile's position down to a single position, and update all positions recursively
+    fn collapse(&mut self) {
         //chose the tile with the lowest entropy to collapse
         let chosen_i = self.chose_tile_to_collapse();
-        //let chosen = &mut self.map[chosen_i.0][chosen_i.1];
+        println!(
+            "chose to collapse: {:?},{:?}",
+            chosen_i, self.map[chosen_i.0][chosen_i.1]
+        );
+
         //concatate all legal states based on neighbor rules
         let mut new_pos: Vec<tile_type> = Vec::new();
 
+        //queue of tiles that need to be updated
+        let mut update_me: VecDeque<(usize, usize)> = VecDeque::new();
+
         //TODO: implement an iterator for me to clean up the code below it
-        let mut neighbors = self.get_neighbors(chosen_i);
+        let neighbors = self.get_neighbors(chosen_i);
 
         //north
         if neighbors.north.is_some() {
-            for possibility in &neighbors.north.unwrap().position {
-                for t in &self.rules.get(possibility).unwrap()[&dir::SOUTH] {
+            update_me.push_back(neighbors.north.unwrap());
+            let t = &self.map[neighbors.north.unwrap().0][neighbors.north.unwrap().1];
+            for possibility in &t.position {
+                //for t in &self.rules.get(possibility).unwrap()[&dir::SOUTH] {
+                for t in &self.rules[possibility][&dir::SOUTH] {
                     if !new_pos.contains(&t) {
                         new_pos.push(t.clone());
                     }
@@ -146,8 +160,10 @@ impl<'a> board {
         }
         //east
         if neighbors.east.is_some() {
-            for possibility in &neighbors.east.unwrap().position {
-                for t in &mut self.rules[possibility][&dir::WEST] {
+            update_me.push_back(neighbors.east.unwrap());
+            let t = &self.map[neighbors.east.unwrap().0][neighbors.east.unwrap().1];
+            for possibility in &t.position {
+                for t in &self.rules[possibility][&dir::WEST] {
                     if !new_pos.contains(t) {
                         new_pos.push(t.clone());
                     }
@@ -156,8 +172,10 @@ impl<'a> board {
         }
         //south
         if neighbors.south.is_some() {
-            for possibility in &neighbors.south.unwrap().position {
-                for t in &mut self.rules[possibility][&dir::NORTH] {
+            update_me.push_back(neighbors.south.unwrap());
+            let t = &self.map[neighbors.south.unwrap().0][neighbors.south.unwrap().1];
+            for possibility in &t.position {
+                for t in &self.rules[possibility][&dir::NORTH] {
                     if !new_pos.contains(t) {
                         new_pos.push(t.clone());
                     }
@@ -166,8 +184,10 @@ impl<'a> board {
         }
         //west
         if neighbors.west.is_some() {
-            for possibility in &neighbors.west.unwrap().position {
-                for t in &mut self.rules[possibility][&dir::EAST] {
+            update_me.push_back(neighbors.west.unwrap());
+            let t = &self.map[neighbors.west.unwrap().0][neighbors.west.unwrap().1];
+            for possibility in &t.position {
+                for t in &self.rules[possibility][&dir::EAST] {
                     if !new_pos.contains(t) {
                         new_pos.push(t.clone());
                     }
@@ -175,13 +195,28 @@ impl<'a> board {
             }
         }
 
+        println!("{:?}", new_pos);
+
         //now just chose one of the allowable positions at random
         self.map[chosen_i.0][chosen_i.1].t =
             Some(*new_pos.choose(&mut rand::thread_rng()).unwrap());
+        //since we can only have a single position now, just give ourselves an empty superposition vector for comparision
+        self.map[chosen_i.0][chosen_i.1].position = Vec::new();
+        self.map[chosen_i.0][chosen_i.1].rep =
+            tile_type_to_char(self.map[chosen_i.0][chosen_i.1].t.unwrap());
 
-        //need to update neighbors
+        println!("chose: {:?}", self.map[chosen_i.0][chosen_i.1].t.unwrap());
 
-        return new_pos;
+        //need to update neighbors positions
+        while !update_me.is_empty() {
+            let next = update_me.pop_front().unwrap();
+            let more = self.update(next);
+            for e in more {
+                update_me.push_back(e);
+            }
+        }
+
+        self.remaining -= 1;
     }
 
     //chose the tile on the board with the lowest entropy and return its coords within the map
@@ -190,51 +225,189 @@ impl<'a> board {
             .map
             .iter()
             .flatten()
-            .min_by(|x, y| x.position.len().cmp(&y.position.len()))
+            .max_by(|x, y| x.entropy().cmp(&y.entropy()))
             .unwrap()
             .coords;
     }
 
-    //returns a neighbors struct, with references to the four neighboring tiles
-    fn get_neighbors(&'a mut self, pos: (usize, usize)) -> neighbors<'a> {
+    //returns a neighbors struct, with inidces into the map of the neighboring tiles
+    fn get_neighbors(&self, pos: (usize, usize)) -> neighbors {
         let mut n = neighbors::new();
-
-        //let mut n = Vec::new();
-
-        //let t = &self.map[pos.0][pos.1];
 
         //north
         if self.map.get(((pos.0 as i32) - 1) as usize).is_some() {
             //n.push(&self.map[pos.0 - 1][pos.1]);
-            n.north = Some(&mut self.map[pos.0 - 1][pos.1]);
+            n.north = Some(self.map[pos.0 - 1][pos.1].coords);
         }
         //south
         if self.map.get((pos.0 + 1) as usize).is_some() {
-            n.south = Some(&mut self.map[pos.0 + 1][pos.1]);
+            n.south = Some(self.map[pos.0 + 1][pos.1].coords);
         }
         //west
         if self.map[pos.0].get(((pos.1 as i32) - 1) as usize).is_some() {
-            n.west = Some(&mut self.map[pos.0][pos.1 - 1]);
+            n.west = Some(self.map[pos.0][pos.1 - 1].coords);
         }
         //east
         if self.map[pos.0].get(((pos.1 as i32) + 1) as usize).is_some() {
-            n.east = Some(&mut self.map[pos.0][pos.1 + 1]);
+            n.east = Some(self.map[pos.0][pos.1 + 1].coords);
         }
 
         return n;
     }
 
-    fn update(&mut self) {}
+    //take a tile with a position, update all its neighbors positions, and return a vec of coords that have been modified
+    fn update(&mut self, tile: (usize, usize)) -> Vec<(usize, usize)> {
+        let mut needs_update: Vec<(usize, usize)> = Vec::new();
+
+        let neighbors = self.get_neighbors(tile);
+
+        //if there is a north tile
+        if neighbors.north.is_some() {
+            let init_pos_length = self.map[neighbors.north.unwrap().0][neighbors.north.unwrap().1]
+                .position
+                .len();
+            //trim the north tile' position down to be only the states allowable by our core tile position
+            for position_possibility in &self.map[tile.0][tile.1].position.clone() {
+                //retain only position possibilities in the neighbor which are valid under the main point's position
+                self.map[neighbors.north.unwrap().0][neighbors.north.unwrap().1]
+                    .position
+                    .retain(|e| self.rules[&position_possibility][&dir::NORTH].contains(e));
+            }
+            let final_pos_length = self.map[neighbors.north.unwrap().0][neighbors.north.unwrap().1]
+                .position
+                .len();
+
+            //if the neighbor has been reduced down to a single position, give it a type and update the struct counter
+            if final_pos_length == 1 {
+                let finalized_type =
+                    self.map[neighbors.north.unwrap().0][neighbors.north.unwrap().1].position[0];
+                self.map[neighbors.north.unwrap().0][neighbors.north.unwrap().1].t =
+                    Some(finalized_type);
+
+                println!(
+                    "{},{} has been finalized to: {:?}",
+                    neighbors.north.unwrap().0,
+                    neighbors.north.unwrap().1,
+                    finalized_type
+                );
+                self.remaining -= 1;
+            } else if init_pos_length != final_pos_length {
+                needs_update.push(neighbors.north.unwrap());
+            }
+        }
+
+        //south
+        if neighbors.south.is_some() {
+            let init_pos_length = self.map[neighbors.south.unwrap().0][neighbors.south.unwrap().1]
+                .position
+                .len();
+            //trim the north tile' position down to be only the states allowable by our core tile position
+            for position_possibility in &self.map[tile.0][tile.1].position.clone() {
+                //retain only position possibilities in the neighbor which are valid under the main point's position
+                self.map[neighbors.south.unwrap().0][neighbors.south.unwrap().1]
+                    .position
+                    .retain(|e| self.rules[&position_possibility][&dir::SOUTH].contains(e));
+            }
+            let final_pos_length = self.map[neighbors.south.unwrap().0][neighbors.south.unwrap().1]
+                .position
+                .len();
+
+            if final_pos_length == 1 {
+                let finalized_type =
+                    self.map[neighbors.south.unwrap().0][neighbors.south.unwrap().1].position[0];
+                self.map[neighbors.south.unwrap().0][neighbors.south.unwrap().1].t =
+                    Some(finalized_type);
+                println!(
+                    "{},{} has been finalized to: {:?}",
+                    neighbors.south.unwrap().0,
+                    neighbors.south.unwrap().1,
+                    finalized_type
+                );
+                self.remaining -= 1;
+            } else if init_pos_length != final_pos_length {
+                needs_update.push(neighbors.south.unwrap());
+            }
+        }
+
+        //east
+        if neighbors.east.is_some() {
+            let init_pos_length = self.map[neighbors.east.unwrap().0][neighbors.east.unwrap().1]
+                .position
+                .len();
+            //trim the north tile' position down to be only the states allowable by our core tile position
+            for position_possibility in &self.map[tile.0][tile.1].position.clone() {
+                //retain only position possibilities in the neighbor which are valid under the main point's position
+                self.map[neighbors.east.unwrap().0][neighbors.east.unwrap().1]
+                    .position
+                    .retain(|e| self.rules[&position_possibility][&dir::EAST].contains(e));
+            }
+            let final_pos_length = self.map[neighbors.east.unwrap().0][neighbors.east.unwrap().1]
+                .position
+                .len();
+
+            if final_pos_length == 1 {
+                let finalized_type =
+                    self.map[neighbors.east.unwrap().0][neighbors.east.unwrap().1].position[0];
+                self.map[neighbors.east.unwrap().0][neighbors.east.unwrap().1].t =
+                    Some(finalized_type);
+                println!(
+                    "{},{} has been finalized to: {:?}",
+                    neighbors.east.unwrap().0,
+                    neighbors.east.unwrap().1,
+                    finalized_type
+                );
+                self.remaining -= 1;
+            } else if init_pos_length != final_pos_length {
+                needs_update.push(neighbors.east.unwrap());
+            }
+        }
+
+        //west
+        if neighbors.west.is_some() {
+            let init_pos_length = self.map[neighbors.west.unwrap().0][neighbors.west.unwrap().1]
+                .position
+                .len();
+            //trim the north tile' position down to be only the states allowable by our core tile position
+            for position_possibility in &self.map[tile.0][tile.1].position.clone() {
+                //retain only position possibilities in the neighbor which are valid under the main point's position
+                self.map[neighbors.west.unwrap().0][neighbors.west.unwrap().1]
+                    .position
+                    .retain(|e| self.rules[&position_possibility][&dir::WEST].contains(e));
+            }
+            let final_pos_length = self.map[neighbors.west.unwrap().0][neighbors.west.unwrap().1]
+                .position
+                .len();
+
+            if final_pos_length == 1 {
+                let finalized_type =
+                    self.map[neighbors.west.unwrap().0][neighbors.west.unwrap().1].position[0];
+                self.map[neighbors.west.unwrap().0][neighbors.west.unwrap().1].t =
+                    Some(finalized_type);
+                println!(
+                    "{},{} has been finalized to: {:?}",
+                    neighbors.west.unwrap().0,
+                    neighbors.west.unwrap().1,
+                    finalized_type
+                );
+                self.remaining -= 1;
+            } else if init_pos_length != final_pos_length {
+                needs_update.push(neighbors.west.unwrap());
+            }
+        }
+
+        return needs_update;
+    }
 }
 
-struct neighbors<'a> {
-    north: Option<&'a mut tile>,
-    south: Option<&'a mut tile>,
-    east: Option<&'a mut tile>,
-    west: Option<&'a mut tile>,
+#[allow(non_camel_case_types)]
+struct neighbors {
+    north: Option<(usize, usize)>,
+    south: Option<(usize, usize)>,
+    east: Option<(usize, usize)>,
+    west: Option<(usize, usize)>,
 }
 
-impl<'a> neighbors<'a> {
+impl neighbors {
     fn new() -> Self {
         Self {
             north: None,
@@ -312,7 +485,11 @@ impl tile {
     }
 
     fn entropy(&self) -> usize {
-        return self.position.len();
+        if self.t.is_some() {
+            return 0;
+        } else {
+            return self.position.len();
+        }
     }
 }
 
@@ -335,5 +512,25 @@ fn char_to_tile_type(in_char: char) -> tile_type {
         '╯' => tile_type::UP_LEFT_ROUND,
         '╰' => tile_type::UP_RIGHT_ROUND,
         _ => panic!("BAD INPUT CHAR"),
+    };
+}
+
+fn tile_type_to_char(t: tile_type) -> char {
+    return match t {
+        tile_type::HORIZ_BAR => '━',
+        tile_type::VERT_BAR => '┃',
+        tile_type::DOWN_RIGHT => '┏',
+        tile_type::DOWN_LEFT => '┓',
+        tile_type::UP_LEFT => '┛',
+        tile_type::UP_RIGHT => '┗',
+        tile_type::VERT_RIGHT => '┣',
+        tile_type::VERT_LEFT => '┫',
+        tile_type::HORIZ_DOWN => '┳',
+        tile_type::HORIZ_UP => '┻',
+        tile_type::CROSS => '╋',
+        tile_type::DOWN_LEFT_ROUND => '╮',
+        tile_type::DOWN_RIGHT_ROUND => '╭',
+        tile_type::UP_LEFT_ROUND => '╯',
+        tile_type::UP_RIGHT_ROUND => '╰',
     };
 }
