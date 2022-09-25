@@ -1,3 +1,4 @@
+use rand::seq::SliceRandom;
 use std::collections::HashMap;
 use std::{fs::File, io::Read};
 fn main() {
@@ -14,7 +15,7 @@ fn main() {
     let mut rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>> = HashMap::new();
     let in_board: Vec<Vec<char>> = contents.lines().map(|l| l.chars().collect()).collect();
     //let mut map: Vec<Vec<tile>> = Vec::new();
-    let mut board = board::new(in_board.len() * in_board[0].len());
+    let mut board = board::new(in_board.len() * in_board[0].len(), rules);
     //vec![vec![tile::fresh(rep)]; in_board.len()];
 
     //iterate over our input board row-major
@@ -25,12 +26,15 @@ fn main() {
 
             //get the rules entry for this kind of tile
             //if it doesnt exist, add a tile vec for each direction
-            let cur = rules.entry(char_to_tile_type(*c)).or_insert(HashMap::from([
-                (dir::WEST, Vec::new()),
-                (dir::NORTH, Vec::new()),
-                (dir::EAST, Vec::new()),
-                (dir::SOUTH, Vec::new()),
-            ]));
+            let cur = board
+                .rules
+                .entry(char_to_tile_type(*c))
+                .or_insert(HashMap::from([
+                    (dir::WEST, Vec::new()),
+                    (dir::NORTH, Vec::new()),
+                    (dir::EAST, Vec::new()),
+                    (dir::SOUTH, Vec::new()),
+                ]));
 
             //north
             //funky casting to allow us to deal with row 0
@@ -75,12 +79,12 @@ fn main() {
                 });
             }
 
-            board.map[row].push(tile::fresh(*c, (row, col)));
+            board.map[row].push(tile::fresh((row, col)));
         }
         print!("\n");
     }
 
-    for (k, v) in rules {
+    for (k, v) in &board.rules {
         println!("{:?}: {:?}", k, v);
     }
 
@@ -98,7 +102,7 @@ fn main() {
         //collapse it
 
         //state = concatenate all neighbors allowed positions, and dedup, then chose at random
-        let new_pos = board.collapse();
+        board.collapse();
 
         //update its neighbors posibilities recursively
     }
@@ -108,16 +112,79 @@ fn main() {
 struct board {
     map: Vec<Vec<tile>>,
     remaining: usize,
+    rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>>,
 }
-impl board {
-    fn new(size: usize) -> Self {
+impl<'a> board {
+    fn new(size: usize, rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>>) -> Self {
         Self {
             map: Vec::new(),
             remaining: size,
+            rules,
         }
     }
 
-    //chose the tile on the board with the lowest entropy and return a mutuable ref to it
+    //one iteration of the collapse algorithm
+    fn collapse(&mut self) -> Vec<tile_type> {
+        //chose the tile with the lowest entropy to collapse
+        let chosen_i = self.chose_tile_to_collapse();
+        //let chosen = &mut self.map[chosen_i.0][chosen_i.1];
+        //concatate all legal states based on neighbor rules
+        let mut new_pos: Vec<tile_type> = Vec::new();
+
+        //TODO: implement an iterator for me to clean up the code below it
+        let mut neighbors = self.get_neighbors(chosen_i);
+
+        //north
+        if neighbors.north.is_some() {
+            for possibility in &neighbors.north.unwrap().position {
+                for t in &self.rules.get(possibility).unwrap()[&dir::SOUTH] {
+                    if !new_pos.contains(&t) {
+                        new_pos.push(t.clone());
+                    }
+                }
+            }
+        }
+        //east
+        if neighbors.east.is_some() {
+            for possibility in &neighbors.east.unwrap().position {
+                for t in &mut self.rules[possibility][&dir::WEST] {
+                    if !new_pos.contains(t) {
+                        new_pos.push(t.clone());
+                    }
+                }
+            }
+        }
+        //south
+        if neighbors.south.is_some() {
+            for possibility in &neighbors.south.unwrap().position {
+                for t in &mut self.rules[possibility][&dir::NORTH] {
+                    if !new_pos.contains(t) {
+                        new_pos.push(t.clone());
+                    }
+                }
+            }
+        }
+        //west
+        if neighbors.west.is_some() {
+            for possibility in &neighbors.west.unwrap().position {
+                for t in &mut self.rules[possibility][&dir::EAST] {
+                    if !new_pos.contains(t) {
+                        new_pos.push(t.clone());
+                    }
+                }
+            }
+        }
+
+        //now just chose one of the allowable positions at random
+        self.map[chosen_i.0][chosen_i.1].t =
+            Some(*new_pos.choose(&mut rand::thread_rng()).unwrap());
+
+        //need to update neighbors
+
+        return new_pos;
+    }
+
+    //chose the tile on the board with the lowest entropy and return its coords within the map
     fn chose_tile_to_collapse(&self) -> (usize, usize) {
         return self
             .map
@@ -128,54 +195,53 @@ impl board {
             .coords;
     }
 
-    //
-    fn collapse(&mut self) -> Vec<tile_type> {
-        //chose the tile with the lowest entropy to collapse
-        let chosen = self.chose_tile_to_collapse();
+    //returns a neighbors struct, with references to the four neighboring tiles
+    fn get_neighbors(&'a mut self, pos: (usize, usize)) -> neighbors<'a> {
+        let mut n = neighbors::new();
 
-        //concatate all neighbors legal states
-        //TODO: need to only consider some of neighbors legalities
-        let mut pos: Vec<tile_type> = Vec::new();
-        for n in self.get_neighbors(&self.map[chosen.0][chosen.1]) {
-            //TODO: why the fuck does vec.apped require the vec being appended to be mutable??
-            for e in &n.position {
-                if !pos.contains(&e) {
-                    //note: this clone is fine bc enums are tiny
-                    pos.push(e.clone());
-                }
-            }
-        }
+        //let mut n = Vec::new();
 
-        return pos;
-    }
-
-    fn get_neighbors(&self, t: &tile) -> Vec<&tile> {
-        let mut n = Vec::new();
+        //let t = &self.map[pos.0][pos.1];
 
         //north
-        if self.map.get(((t.coords.0 as i32) - 1) as usize).is_some() {
-            n.push(&self.map[t.coords.0 - 1][t.coords.1]);
+        if self.map.get(((pos.0 as i32) - 1) as usize).is_some() {
+            //n.push(&self.map[pos.0 - 1][pos.1]);
+            n.north = Some(&mut self.map[pos.0 - 1][pos.1]);
         }
         //south
-        if self.map.get((t.coords.0 + 1) as usize).is_some() {
-            n.push(&self.map[t.coords.0 + 1][t.coords.1]);
+        if self.map.get((pos.0 + 1) as usize).is_some() {
+            n.south = Some(&mut self.map[pos.0 + 1][pos.1]);
         }
         //west
-        if self.map[t.coords.0]
-            .get(((t.coords.1 as i32) - 1) as usize)
-            .is_some()
-        {
-            n.push(&self.map[t.coords.0][t.coords.1 - 1]);
+        if self.map[pos.0].get(((pos.1 as i32) - 1) as usize).is_some() {
+            n.west = Some(&mut self.map[pos.0][pos.1 - 1]);
         }
         //east
-        if self.map[t.coords.0]
-            .get(((t.coords.1 as i32) + 1) as usize)
-            .is_some()
-        {
-            n.push(&self.map[t.coords.0][t.coords.1 + 1]);
+        if self.map[pos.0].get(((pos.1 as i32) + 1) as usize).is_some() {
+            n.east = Some(&mut self.map[pos.0][pos.1 + 1]);
         }
 
         return n;
+    }
+
+    fn update(&mut self) {}
+}
+
+struct neighbors<'a> {
+    north: Option<&'a mut tile>,
+    south: Option<&'a mut tile>,
+    east: Option<&'a mut tile>,
+    west: Option<&'a mut tile>,
+}
+
+impl<'a> neighbors<'a> {
+    fn new() -> Self {
+        Self {
+            north: None,
+            south: None,
+            east: None,
+            west: None,
+        }
     }
 }
 
@@ -215,15 +281,16 @@ enum tile_type {
 struct tile {
     coords: (usize, usize),
     rep: char,
-    t: tile_type,
+    //tile only has a type once it has been fully collapsed
+    t: Option<tile_type>,
     position: Vec<tile_type>,
 }
 impl tile {
-    fn fresh(rep: char, coords: (usize, usize)) -> Self {
+    fn fresh(coords: (usize, usize)) -> Self {
         Self {
             coords,
-            rep,
-            t: char_to_tile_type(rep),
+            rep: 'X',
+            t: None,
             position: vec![
                 tile_type::HORIZ_BAR,
                 tile_type::VERT_BAR,
