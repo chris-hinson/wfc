@@ -16,11 +16,12 @@ fn main() {
     let in_board: Vec<Vec<char>> = contents.lines().map(|l| l.chars().collect()).collect();
 
     //the real board
-    let mut board = board::new(in_board.len() * in_board[0].len(), rules);
+    //let mut board = board::new(in_board.len() * in_board[0].len(), rules);
+    let mut board = board::new((in_board.len() * 2, in_board[0].len() * 2), rules);
 
-    //iterate over our input board row-major
+    //iterate over our input board row-major to generate rules
     for (row, line) in in_board.iter().enumerate() {
-        board.map.push(Vec::new());
+        //board.map.push(Vec::new());
         for (col, c) in line.iter().enumerate() {
             print!("{c}");
 
@@ -96,7 +97,7 @@ fn main() {
                     Some(true)
                 });
 
-            board.map[row].push(tile::fresh((row, col)));
+            //board.map[row].push(tile::fresh((row, col)));
         }
         print!("\n");
     }
@@ -112,11 +113,11 @@ fn main() {
         //keep the board state before collapse in the undo stack
 
         match board.collapse() {
-            Ok(v) => {
+            Ok(_v) => {
                 undo.push(board.clone());
             }
             //TODO: ig if we failed very very early this could panic??
-            Err(e) => board = undo.pop().unwrap(),
+            Err(_e) => board = undo.pop().unwrap(),
         }
 
         for row in &board.map {
@@ -156,10 +157,19 @@ impl IndexMut<(usize, usize)> for board {
 }
 
 impl board {
-    fn new(size: usize, rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>>) -> Self {
+    fn new(size: (usize, usize), rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>>) -> Self {
+        let mut map: Vec<Vec<tile>> = Vec::new();
+
+        for row in 0..size.0 {
+            map.push(Vec::new());
+            for col in 0..size.1 {
+                map[row].push(tile::fresh((row, col)));
+            }
+        }
+
         Self {
-            map: Vec::new(),
-            remaining: size,
+            map: map,
+            remaining: size.0 * size.1,
             rules,
         }
     }
