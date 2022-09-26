@@ -9,59 +9,13 @@ fn main() {
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
 
-    //println!("{:?}", contents);
-
-    /*let chars: [char; 15] = [
-        '━', '┃', '┏', '┓', '┛', '┗', '┣', '┫', '┳', '┻', '╋', '╮', '╭', '╯', '╰',
-    ];*/
-
-    let mut test_vec: Vec<char> = Vec::new();
-
-    for c in 0x02500..=0x025FF {
-        test_vec.push(char::from_u32(c as u32).unwrap());
-    }
-
-    test_vec.retain(|e| {
-        (unicode_names2::name(*e)
-            .unwrap()
-            .to_string()
-            .contains("BOX DRAWINGS HEAVY")
-            || unicode_names2::name(*e)
-                .unwrap()
-                .to_string()
-                .contains("LIGHT ARC")
-            || unicode_names2::name(*e)
-                .unwrap()
-                .to_string()
-                .contains("BOX DRAWINGS VERTICAL")
-            || unicode_names2::name(*e)
-                .unwrap()
-                .to_string()
-                .contains("BOX DRAWINGS HORIZONTAL"))
-            && !unicode_names2::name(*e)
-                .unwrap()
-                .to_string()
-                .contains("DASH")
-            && !unicode_names2::name(*e)
-                .unwrap()
-                .to_string()
-                .contains("AND LIGHT")
-            && !unicode_names2::name(*e)
-                .unwrap()
-                .to_string()
-                .contains("DOUBLE")
-            && unicode_names2::name(*e)
-                .unwrap()
-                .to_string()
-                .contains("AND")
-    });
-    for c in test_vec {
-        println!("{c}: {}", unicode_names2::name(c).unwrap().to_string());
-    }
-
+    //adjacency rules
     let rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>> = HashMap::new();
+
+    //input board (should only be characters)
     let in_board: Vec<Vec<char>> = contents.lines().map(|l| l.chars().collect()).collect();
 
+    //the real board
     let mut board = board::new(in_board.len() * in_board[0].len(), rules);
 
     //iterate over our input board row-major
@@ -97,18 +51,6 @@ fn main() {
                     Some(true)
                 });
 
-            //funky casting to allow us to deal with row 0
-            /*if in_board.get((row as i32 - 1) as usize).is_some() {
-                //modify the hashmap entry for the NORTH direction
-                cur.entry(dir::NORTH).and_modify(|vec| {
-                    let t = char_to_tile_type(in_board[row - 1][col]);
-                    //only add this to the rules if it is not already in the rules
-                    if !vec.contains(&t) {
-                        vec.push(t);
-                    }
-                });
-            }*/
-
             //SOUTH
             row.checked_add(1)
                 .and_then(|r| in_board.get(r))
@@ -123,14 +65,6 @@ fn main() {
 
                     Some(true)
                 });
-            /*if in_board.get(row + 1).is_some() {
-                cur.entry(dir::SOUTH).and_modify(|vec| {
-                    let t = char_to_tile_type(in_board[row + 1][col]);
-                    if !vec.contains(&t) {
-                        vec.push(t);
-                    }
-                });
-            }*/
 
             //WEST
 
@@ -146,14 +80,6 @@ fn main() {
 
                     Some(true)
                 });
-            /*if in_board[row].get(((col as i32) - 1) as usize).is_some() {
-                cur.entry(dir::WEST).and_modify(|vec| {
-                    let t = char_to_tile_type(in_board[row][col - 1]);
-                    if !vec.contains(&t) {
-                        vec.push(t);
-                    }
-                });
-            }*/
 
             //EAST
 
@@ -169,14 +95,6 @@ fn main() {
 
                     Some(true)
                 });
-            /*if in_board[row].get(col + 1).is_some() {
-                cur.entry(dir::EAST).and_modify(|vec| {
-                    let t = char_to_tile_type(in_board[row][col + 1]);
-                    if !vec.contains(&t) {
-                        vec.push(t);
-                    }
-                });
-            }*/
 
             board.map[row].push(tile::fresh((row, col)));
         }
@@ -197,7 +115,7 @@ fn main() {
         }
     }
 
-    println!("{:?}", board.map);
+    //println!("{:?}", board.map);
 }
 
 //TODO: reconsider internalizing the map within this struct.
