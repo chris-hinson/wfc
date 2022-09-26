@@ -122,6 +122,8 @@ fn main() {
     while board.remaining > 0 {
         //keep the board state before collapse in the undo stack
 
+        //TODO: you arent actually backtracking here bc you are not eliminating bad states
+        //youre just relying on randomness to not choose them again
         match board.collapse() {
             Ok(v) => {
                 undo.push(v);
@@ -136,14 +138,16 @@ fn main() {
             }
         }
 
-        /*for row in &board.map {
+        println!("\n");
+        for row in &board.map {
             for c in row {
                 print!("{}", c.rep);
             }
             print!("\n")
-        }*/
+        }
     }
 
+    println!("\n");
     for row in &board.map {
         for c in row {
             print!("{}", c.rep);
@@ -204,8 +208,6 @@ impl board {
         //chose the tile with the lowest entropy to collapse
         let chosen_i = self.chose_tile_to_collapse();
 
-        //backup the tile we are about to collapse
-        backup_tiles.push(self[chosen_i].clone());
         /*println!(
             "{} {:?},{:?}",
             "chosing to collapse:".red(),
@@ -232,8 +234,14 @@ impl board {
 
         //now just chose one of the allowable positions at random
         let choice = new_pos.choose(&mut rand::thread_rng());
+
         if choice.is_none() {
             return Err("could not collapse tile".to_string());
+        } else {
+            //backup the tile we are about to collapse
+            let mut backup = self[chosen_i].clone();
+            backup.position.retain(|e| e != choice.unwrap());
+            backup_tiles.push(backup);
         }
         self.map[chosen_i.0][chosen_i.1].t = Some(*choice.unwrap());
         //since we can only have a single position now, just give ourselves an empty superposition vector for comparision
@@ -315,7 +323,7 @@ impl board {
     //takes 1 tile, which we can assume to have a concrete type, and udpates its neighbors positions
     //returns the backup state of any tiles whos position was changed
     fn update(&mut self, center_tile: (usize, usize)) -> Vec<tile> {
-        let mut update_vec: Vec<tile> = Vec::new();
+        let mut changed_tiles: Vec<tile> = Vec::new();
 
         /*println!(
             "{}{:?}",
@@ -335,7 +343,7 @@ impl board {
                     "initial position".green(),
                     self[neighbor.tile].position
                 );*/
-                update_vec.push(self[neighbor.tile].clone());
+                changed_tiles.push(self[neighbor.tile].clone());
 
                 let mut new_position = self[neighbor.tile].position.clone();
                 new_position
@@ -356,7 +364,7 @@ impl board {
             }
         }
 
-        return update_vec;
+        return changed_tiles;
     }
 }
 
