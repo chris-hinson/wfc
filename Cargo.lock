@@ -99,6 +99,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unicode_names2"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "029df4cc8238cefc911704ff8fa210853a0f3bce2694d8f51181dd41ee0f3301"
+
+[[package]]
 name = "wasi"
 version = "0.11.0+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -110,6 +116,7 @@ version = "0.1.0"
 dependencies = [
  "colored",
  "rand",
+ "unicode_names2",
 ]
 
 [[package]]
