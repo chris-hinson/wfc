@@ -1,11 +1,17 @@
 use colored::Colorize;
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
+use std::env;
 use std::ops::Index;
 use std::ops::IndexMut;
 use std::{fs::File, io::Read};
 fn main() {
-    let mut file = File::open("chars.txt").unwrap();
+    let args: Vec<String> = env::args().collect();
+
+    println!("{args:?}");
+
+    //let mut file = File::open("chars.txt").unwrap();
+    let mut file = File::open(args[3].clone()).unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
 
@@ -16,14 +22,19 @@ fn main() {
     let in_board: Vec<Vec<char>> = contents.lines().map(|l| l.chars().collect()).collect();
 
     //the real board
-    //let mut board = board::new(in_board.len() * in_board[0].len(), rules);
-    let mut board = board::new((in_board.len() * 2, in_board[0].len() * 2), rules);
+    //let mut board = board::new((100, 100), rules);
+    let mut board = board::new(
+        (
+            args[1].parse::<usize>().unwrap(),
+            args[2].parse::<usize>().unwrap(),
+        ),
+        rules,
+    );
 
     //iterate over our input board row-major to generate rules
     for (row, line) in in_board.iter().enumerate() {
-        //board.map.push(Vec::new());
         for (col, c) in line.iter().enumerate() {
-            print!("{c}");
+            //print!("{c}");
 
             //get the rules entry for this kind of tile
             //if it doesnt exist, add a tile_type vec for each direction
@@ -96,36 +107,48 @@ fn main() {
 
                     Some(true)
                 });
-
-            //board.map[row].push(tile::fresh((row, col)));
         }
-        print!("\n");
+        //print!("\n");
     }
 
-    for (k, v) in &board.rules {
+    /*for (k, v) in &board.rules {
         println!("{:?}: {:?}", k, v);
-    }
+    }*/
 
-    let mut undo: Vec<board> = Vec::new();
-    undo.push(board.clone());
+    //undo stack contains vectors of tiles which we must replace when we undo a move
+    let mut undo: Vec<Vec<tile>> = Vec::new();
+    //undo.push(board.clone());
 
     while board.remaining > 0 {
         //keep the board state before collapse in the undo stack
 
         match board.collapse() {
-            Ok(_v) => {
-                undo.push(board.clone());
+            Ok(v) => {
+                undo.push(v);
             }
             //TODO: ig if we failed very very early this could panic??
-            Err(_e) => board = undo.pop().unwrap(),
+            Err(_e) => {
+                let undo_tiles = undo.pop().unwrap();
+                board.remaining += 1;
+                for tile in undo_tiles {
+                    board[tile.coords] = tile.clone();
+                }
+            }
         }
 
-        for row in &board.map {
+        /*for row in &board.map {
             for c in row {
                 print!("{}", c.rep);
             }
             print!("\n")
+        }*/
+    }
+
+    for row in &board.map {
+        for c in row {
+            print!("{}", c.rep);
         }
+        print!("\n")
     }
 
     //println!("{:?}", board.map);
@@ -168,22 +191,27 @@ impl board {
         }
 
         Self {
-            map: map,
+            map,
             remaining: size.0 * size.1,
             rules,
         }
     }
 
     //collapse a tile's position down to a single position, and update all its neighbors positions ~~recursively~~
-    fn collapse(&mut self) -> Result<String, String> {
+    fn collapse(&mut self) -> Result<Vec<tile>, String> {
+        let mut backup_tiles: Vec<tile> = Vec::new();
+
         //chose the tile with the lowest entropy to collapse
         let chosen_i = self.chose_tile_to_collapse();
-        println!(
+
+        //backup the tile we are about to collapse
+        backup_tiles.push(self[chosen_i].clone());
+        /*println!(
             "{} {:?},{:?}",
             "chosing to collapse:".red(),
             chosen_i,
             self.map[chosen_i.0][chosen_i.1]
-        );
+        );*/
 
         //concatate all legal states based on neighbor rules
         let mut new_pos: Vec<tile_type> = Vec::new();
@@ -213,18 +241,19 @@ impl board {
         self.map[chosen_i.0][chosen_i.1].rep =
             tile_type_to_char(self.map[chosen_i.0][chosen_i.1].t.unwrap());
 
-        println!(
+        /*println!(
             "{} {:?} \nfrom {:?}",
             "chose:".red(),
             self.map[chosen_i.0][chosen_i.1].t.unwrap(),
             new_pos
-        );
+        );*/
 
-        self.update(chosen_i);
+        let mut updated = self.update(chosen_i);
+        backup_tiles.append(&mut updated);
 
         self.remaining -= 1;
 
-        return Ok("collapsed tile succcessfully".to_string());
+        return Ok(backup_tiles);
     }
 
     //chose the tile on the board with the lowest entropy and return its coords within the map
@@ -284,24 +313,30 @@ impl board {
     }
 
     //takes 1 tile, which we can assume to have a concrete type, and udpates its neighbors positions
-    fn update(&mut self, center_tile: (usize, usize)) {
-        println!(
+    //returns the backup state of any tiles whos position was changed
+    fn update(&mut self, center_tile: (usize, usize)) -> Vec<tile> {
+        let mut update_vec: Vec<tile> = Vec::new();
+
+        /*println!(
             "{}{:?}",
             "updating neighbors of: ".green(),
             self[center_tile]
-        );
+        );*/
 
         let neighbors = self.get_neighbors(center_tile);
         let concrete_type = self[center_tile].t.unwrap();
 
         for neighbor in neighbors {
-            if !self[neighbor.tile].t.is_some() {
-                println!("\n{}{:?}", "updating: ".green(), neighbor.tile);
-                println!(
+            //only update the position of tile which do not have a concrete type
+            if self[neighbor.tile].t.is_none() {
+                //println!("\n{}{:?}", "updating: ".green(), neighbor.tile);
+                /*println!(
                     "{} {:?}",
                     "initial position".green(),
                     self[neighbor.tile].position
-                );
+                );*/
+                update_vec.push(self[neighbor.tile].clone());
+
                 let mut new_position = self[neighbor.tile].position.clone();
                 new_position
                     .retain(|e| self.rules[&concrete_type][&neighbor.direction].contains(e));
@@ -313,13 +348,15 @@ impl board {
                     self.remaining -= 1;
                 }
 
-                println!(
+                /*println!(
                     "{} {:?}",
                     "final position".green(),
                     self[neighbor.tile].position
-                );
+                );*/
             }
         }
+
+        return update_vec;
     }
 }
 
