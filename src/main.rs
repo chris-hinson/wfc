@@ -105,8 +105,20 @@ fn main() {
         println!("{:?}: {:?}", k, v);
     }
 
+    let mut undo: Vec<board> = Vec::new();
+    undo.push(board.clone());
+
     while board.remaining > 0 {
-        board.collapse();
+        //keep the board state before collapse in the undo stack
+
+        match board.collapse() {
+            Ok(v) => {
+                undo.push(board.clone());
+            }
+            //TODO: ig if we failed very very early this could panic??
+            Err(e) => board = undo.pop().unwrap(),
+        }
+
         for row in &board.map {
             for c in row {
                 print!("{}", c.rep);
@@ -122,6 +134,7 @@ fn main() {
 //because it is a local variable, we cant pass around references to tiles within it without the borrow checker getting mad
 //so we instead have to refer to tiles by coords: (usize,usize)
 #[allow(non_camel_case_types)]
+#[derive(Debug, Clone)]
 struct board {
     map: Vec<Vec<tile>>,
     remaining: usize,
@@ -152,7 +165,7 @@ impl board {
     }
 
     //collapse a tile's position down to a single position, and update all its neighbors positions ~~recursively~~
-    fn collapse(&mut self) {
+    fn collapse(&mut self) -> Result<String, String> {
         //chose the tile with the lowest entropy to collapse
         let chosen_i = self.chose_tile_to_collapse();
         println!(
@@ -180,8 +193,11 @@ impl board {
         }
 
         //now just chose one of the allowable positions at random
-        self.map[chosen_i.0][chosen_i.1].t =
-            Some(*new_pos.choose(&mut rand::thread_rng()).unwrap());
+        let choice = new_pos.choose(&mut rand::thread_rng());
+        if choice.is_none() {
+            return Err("could not collapse tile".to_string());
+        }
+        self.map[chosen_i.0][chosen_i.1].t = Some(*choice.unwrap());
         //since we can only have a single position now, just give ourselves an empty superposition vector for comparision
         self.map[chosen_i.0][chosen_i.1].position = Vec::new();
         self.map[chosen_i.0][chosen_i.1].rep =
@@ -197,6 +213,8 @@ impl board {
         self.update(chosen_i);
 
         self.remaining -= 1;
+
+        return Ok("collapsed tile succcessfully".to_string());
     }
 
     //chose the tile on the board with the lowest entropy and return its coords within the map
@@ -365,7 +383,7 @@ impl neighbors {
     }
 }
 
-#[derive(PartialEq, Hash, Eq, Debug)]
+#[derive(PartialEq, Hash, Eq, Debug, Clone)]
 #[allow(non_camel_case_types)]
 enum dir {
     WEST,
