@@ -1,10 +1,12 @@
-use colored::Colorize;
+//use colored::Colorize;
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
 use std::env;
 use std::ops::Index;
 use std::ops::IndexMut;
 use std::{fs::File, io::Read};
+
+use rand::thread_rng;
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -115,37 +117,8 @@ fn main() {
         println!("{:?}: {:?}", k, v);
     }*/
 
-    //undo stack contains vectors of tiles which we must replace when we undo a move
-    let mut undo: Vec<Vec<tile>> = Vec::new();
-    //undo.push(board.clone());
-
-    while board.remaining > 0 {
-        //keep the board state before collapse in the undo stack
-
-        //TODO: you arent actually backtracking here bc you are not eliminating bad states
-        //youre just relying on randomness to not choose them again
-        match board.collapse() {
-            Ok(v) => {
-                undo.push(v);
-            }
-            //TODO: ig if we failed very very early this could panic??
-            Err(_e) => {
-                let undo_tiles = undo.pop().unwrap();
-                board.remaining += 1;
-                for tile in undo_tiles {
-                    board[tile.coords] = tile.clone();
-                }
-            }
-        }
-
-        println!("\n");
-        for row in &board.map {
-            for c in row {
-                print!("{}", c.rep);
-            }
-            print!("\n")
-        }
-    }
+    let solvable = board.collapse(board.chose_tile_to_collapse());
+    println!("solved? {solvable:?}");
 
     println!("\n");
     for row in &board.map {
@@ -165,7 +138,6 @@ fn main() {
 #[derive(Debug, Clone)]
 struct board {
     map: Vec<Vec<tile>>,
-    remaining: usize,
     rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>>,
 }
 
@@ -194,74 +166,44 @@ impl board {
             }
         }
 
-        Self {
-            map,
-            remaining: size.0 * size.1,
-            rules,
-        }
+        Self { map, rules }
     }
 
-    //collapse a tile's position down to a single position, and update all its neighbors positions ~~recursively~~
-    fn collapse(&mut self) -> Result<Vec<tile>, String> {
-        let mut backup_tiles: Vec<tile> = Vec::new();
+    //TODO: this has a fucking abysmal runtime, please figure out a way to make it better
+    //this will make sure no tiles on the board are breaking adjacency rules. it will NOT check if we have a completed board
+    fn valid_position(&self) -> bool {
+        for row in &self.map {
+            for col in row {
+                //empty superpositions are not valid unless the tile has a concrete type
+                if col.position.len() == 0 && col.t.is_none() {
+                    return false;
+                }
 
-        //chose the tile with the lowest entropy to collapse
-        let chosen_i = self.chose_tile_to_collapse();
-
-        /*println!(
-            "{} {:?},{:?}",
-            "chosing to collapse:".red(),
-            chosen_i,
-            self.map[chosen_i.0][chosen_i.1]
-        );*/
-
-        //concatate all legal states based on neighbor rules
-        let mut new_pos: Vec<tile_type> = Vec::new();
-
-        let neighbors = self.get_neighbors(chosen_i);
-
-        //look at each of our tile's neighbors
-        for neighbor in neighbors {
-            let superposition = &self[neighbor.tile].position;
-            for position in superposition {
-                for allowed in &self.rules[position][&neighbor.anti_direction] {
-                    if !new_pos.contains(&allowed) {
-                        new_pos.push(*allowed);
+                //only way we could be breaking adjacency rules is if this tile has a concrete position and one of its neighbors
+                //ALSO has a conrete position, which is not allowed beside it
+                if col.t.is_some() {
+                    for n in self.get_neighbors(col.coords) {
+                        if n.tile.t.is_some() {
+                            if !self.rules[&n.tile.t.unwrap()][&n.anti_direction]
+                                .contains(&col.t.unwrap())
+                            {
+                                return false;
+                            }
+                        }
                     }
                 }
             }
         }
 
-        //now just chose one of the allowable positions at random
-        let choice = new_pos.choose(&mut rand::thread_rng());
+        return true;
+    }
 
-        if choice.is_none() {
-            return Err("could not collapse tile".to_string());
-        } else {
-            //backup the tile we are about to collapse
-            let mut backup = self[chosen_i].clone();
-            backup.position.retain(|e| e != choice.unwrap());
-            backup_tiles.push(backup);
+    fn is_solved(&self) -> bool {
+        if !self.valid_position() {
+            return false;
         }
-        self.map[chosen_i.0][chosen_i.1].t = Some(*choice.unwrap());
-        //since we can only have a single position now, just give ourselves an empty superposition vector for comparision
-        self.map[chosen_i.0][chosen_i.1].position = Vec::new();
-        self.map[chosen_i.0][chosen_i.1].rep =
-            tile_type_to_char(self.map[chosen_i.0][chosen_i.1].t.unwrap());
 
-        /*println!(
-            "{} {:?} \nfrom {:?}",
-            "chose:".red(),
-            self.map[chosen_i.0][chosen_i.1].t.unwrap(),
-            new_pos
-        );*/
-
-        let mut updated = self.update(chosen_i);
-        backup_tiles.append(&mut updated);
-
-        self.remaining -= 1;
-
-        return Ok(backup_tiles);
+        return !self.map.iter().flatten().any(|t| t.t == None);
     }
 
     //chose the tile on the board with the lowest entropy and return its coords within the map
@@ -284,7 +226,7 @@ impl board {
             .0
             .checked_sub(1)
             .and_then(|e| self.map.get(e))
-            .and_then(|f| Some(f[pos.1].coords));
+            .and_then(|f| Some(f[pos.1].clone()));
 
         //println!("north: {:?}", n.north);
 
@@ -293,7 +235,7 @@ impl board {
             .0
             .checked_add(1)
             .and_then(|e| self.map.get(e))
-            .and_then(|f| Some(f[pos.1].coords));
+            .and_then(|f| Some(f[pos.1].clone()));
 
         //println!("south: {:?}", n.south);
 
@@ -302,7 +244,7 @@ impl board {
             .1
             .checked_sub(1)
             .and_then(|e| self.map[pos.0].get(e))
-            .and_then(|f| Some(f.coords));
+            .and_then(|f| Some(f.clone()));
 
         //println!("west: {:?}", n.west);
 
@@ -311,7 +253,7 @@ impl board {
             .1
             .checked_add(1)
             .and_then(|e| self.map[pos.0].get(e))
-            .and_then(|f| Some(f.coords));
+            .and_then(|f| Some(f.clone()));
 
         //println!("east: {:?}", n.east);
 
@@ -320,68 +262,77 @@ impl board {
         return n;
     }
 
-    //takes 1 tile, which we can assume to have a concrete type, and udpates its neighbors positions
-    //returns the backup state of any tiles whos position was changed
-    fn update(&mut self, center_tile: (usize, usize)) -> Vec<tile> {
-        let mut changed_tiles: Vec<tile> = Vec::new();
-
-        /*println!(
-            "{}{:?}",
-            "updating neighbors of: ".green(),
-            self[center_tile]
-        );*/
-
-        let neighbors = self.get_neighbors(center_tile);
-        let concrete_type = self[center_tile].t.unwrap();
-
-        for neighbor in neighbors {
-            //only update the position of tile which do not have a concrete type
-            if self[neighbor.tile].t.is_none() {
-                //println!("\n{}{:?}", "updating: ".green(), neighbor.tile);
-                /*println!(
-                    "{} {:?}",
-                    "initial position".green(),
-                    self[neighbor.tile].position
-                );*/
-                changed_tiles.push(self[neighbor.tile].clone());
-
-                let mut new_position = self[neighbor.tile].position.clone();
-                new_position
-                    .retain(|e| self.rules[&concrete_type][&neighbor.direction].contains(e));
-                self[neighbor.tile].position = new_position;
-
-                if self[neighbor.tile].position.len() == 1 {
-                    self[neighbor.tile].t = Some(self[neighbor.tile].position[0]);
-                    self[neighbor.tile].rep = tile_type_to_char(self[neighbor.tile].t.unwrap());
-                    self.remaining -= 1;
-                }
-
-                /*println!(
-                    "{} {:?}",
-                    "final position".green(),
-                    self[neighbor.tile].position
-                );*/
-            }
+    //takes 1 tile, collapses its state down to a concrete type, and udpates its neighbors super-positions
+    //returns a result of a tile vec, either to put it in the backup queue or immeadiately undo it
+    //fn collapse(&mut self, center_tile: (usize, usize)) -> Result<Vec<tile>, Vec<tile>> {
+    fn collapse(&mut self, center_tile: (usize, usize)) -> bool {
+        //gtfo of here and return our way up the call stack if we have solved our board
+        if self.is_solved() {
+            return true;
         }
 
-        return changed_tiles;
+        //backup the superposition and zero it out
+        let mut random_pos = self[center_tile].position.clone();
+        let backup_pos = self[center_tile].position.clone();
+        self[center_tile].position = Vec::new();
+
+        //iterate through the possible positions of the superposition
+        random_pos.shuffle(&mut thread_rng());
+        for pos in random_pos {
+            //tentatively give our tile this concrete position and give it a char rep
+            self[center_tile].t = Some(pos);
+            self[center_tile].rep = tile_type_to_char(pos);
+
+            //backup neighbors and
+            // update neighbors superpositions according to the subposition we are trying
+            let old_neighbors = self.get_neighbors(center_tile);
+            for mut n in self.get_neighbors(center_tile) {
+                n.tile
+                    .position
+                    .retain(|t| self.rules[&pos][&n.direction].contains(t));
+            }
+
+            //if this subposition is a valid position, call solve on the next tile to be collapse
+            if self.valid_position() {
+                // if we are not in a solved board, continue recursing, otherwise, return our way up the call stack
+                if self.collapse(self.chose_tile_to_collapse()) {
+                    return true;
+                } else {
+                }
+            } else {
+                for n in old_neighbors {
+                    self[n.tile.coords] = n.tile.clone();
+                }
+            }
+        }
+        self[center_tile].t = None;
+        self[center_tile].position = backup_pos.clone();
+        return false;
     }
 }
 
-#[allow(non_camel_case_types)]
+/*#[allow(non_camel_case_types)]
 #[derive(Debug)]
 struct neighbors {
     north: Option<(usize, usize)>,
     south: Option<(usize, usize)>,
     east: Option<(usize, usize)>,
     west: Option<(usize, usize)>,
+}*/
+#[allow(non_camel_case_types)]
+#[derive(Debug)]
+struct neighbors {
+    north: Option<tile>,
+    south: Option<tile>,
+    east: Option<tile>,
+    west: Option<tile>,
 }
 
 #[allow(non_camel_case_types)]
 struct neighborIterElement {
     direction: dir,
     anti_direction: dir,
-    tile: (usize, usize),
+    tile: tile,
 }
 
 impl IntoIterator for neighbors {
