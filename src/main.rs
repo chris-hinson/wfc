@@ -18,44 +18,39 @@ fn main() {
     file.read_to_string(&mut contents).unwrap();
 
     //adjacency rules
-    let rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>> = HashMap::new();
+    let mut tile_types: Vec<usize> = Vec::new();
+    let mut rules: HashMap<usize, HashMap<dir, Vec<usize>>> = HashMap::new();
 
     //input board (should only be characters)
     let in_board: Vec<Vec<char>> = contents.lines().map(|l| l.chars().collect()).collect();
 
     //the real board
     //let mut board = board::new((100, 100), rules);
-    let mut board = board::new(
-        (
-            args[1].parse::<usize>().unwrap(),
-            args[2].parse::<usize>().unwrap(),
-        ),
-        rules,
-    );
 
     //iterate over our input board row-major to generate rules
     for (row, line) in in_board.iter().enumerate() {
         for (col, c) in line.iter().enumerate() {
             //print!("{c}");
 
+            if !tile_types.contains(&(*c as usize)) {
+                tile_types.push(*c as usize);
+            }
+
             //get the rules entry for this kind of tile
             //if it doesnt exist, add a tile_type vec for each direction
-            let cur = board
-                .rules
-                .entry(char_to_tile_type(*c))
-                .or_insert(HashMap::from([
-                    (dir::WEST, Vec::new()),
-                    (dir::NORTH, Vec::new()),
-                    (dir::EAST, Vec::new()),
-                    (dir::SOUTH, Vec::new()),
-                ]));
+            let cur = rules.entry(*c as usize).or_insert(HashMap::from([
+                (dir::WEST, Vec::new()),
+                (dir::NORTH, Vec::new()),
+                (dir::EAST, Vec::new()),
+                (dir::SOUTH, Vec::new()),
+            ]));
 
             //north
             row.checked_sub(1)
                 .and_then(|r| in_board.get(r))
                 .and_then(|c| c.get(col))
                 .and_then(|e| {
-                    let north_type = char_to_tile_type(*e);
+                    let north_type = *e as usize;
                     cur.entry(dir::NORTH).and_modify(|allowed| {
                         if !allowed.contains(&north_type) {
                             allowed.push(north_type);
@@ -70,7 +65,7 @@ fn main() {
                 .and_then(|r| in_board.get(r))
                 .and_then(|c| c.get(col))
                 .and_then(|e| {
-                    let north_type = char_to_tile_type(*e);
+                    let north_type = *e as usize;
                     cur.entry(dir::SOUTH).and_modify(|allowed| {
                         if !allowed.contains(&north_type) {
                             allowed.push(north_type);
@@ -85,7 +80,7 @@ fn main() {
             col.checked_sub(1)
                 .and_then(|col| in_board[row].get(col))
                 .and_then(|char| {
-                    let north_type = char_to_tile_type(*char);
+                    let north_type = *char as usize;
                     cur.entry(dir::WEST).and_modify(|allowed| {
                         if !allowed.contains(&north_type) {
                             allowed.push(north_type);
@@ -100,7 +95,7 @@ fn main() {
             col.checked_add(1)
                 .and_then(|col| in_board[row].get(col))
                 .and_then(|char| {
-                    let north_type = char_to_tile_type(*char);
+                    let north_type = *char as usize;
                     cur.entry(dir::EAST).and_modify(|allowed| {
                         if !allowed.contains(&north_type) {
                             allowed.push(north_type);
@@ -113,6 +108,17 @@ fn main() {
         //print!("\n");
     }
 
+    println!("done rulegen");
+
+    let mut board = board::new(
+        (
+            args[1].parse::<usize>().unwrap(),
+            args[2].parse::<usize>().unwrap(),
+        ),
+        rules,
+        tile_types,
+    );
+
     /*for (k, v) in &board.rules {
         println!("{:?}: {:?}", k, v);
     }*/
@@ -123,7 +129,8 @@ fn main() {
     println!("\n");
     for row in &board.map {
         for c in row {
-            print!("{}", c.rep);
+            //print!("{}", char::from_digit(c.t.unwrap() as u32).unwrap());
+            print!("{}", char::from_u32(c.t.unwrap() as u32).unwrap());
         }
         print!("\n")
     }
@@ -138,7 +145,8 @@ fn main() {
 #[derive(Debug, Clone)]
 struct board {
     map: Vec<Vec<tile>>,
-    rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>>,
+    rules: HashMap<usize, HashMap<dir, Vec<usize>>>,
+    //tile_types: Vec<usize>,
 }
 
 impl Index<(usize, usize)> for board {
@@ -156,17 +164,25 @@ impl IndexMut<(usize, usize)> for board {
 }
 
 impl board {
-    fn new(size: (usize, usize), rules: HashMap<tile_type, HashMap<dir, Vec<tile_type>>>) -> Self {
+    fn new(
+        size: (usize, usize),
+        rules: HashMap<usize, HashMap<dir, Vec<usize>>>,
+        tile_types: Vec<usize>,
+    ) -> Self {
         let mut map: Vec<Vec<tile>> = Vec::new();
 
         for row in 0..size.0 {
             map.push(Vec::new());
             for col in 0..size.1 {
-                map[row].push(tile::fresh((row, col)));
+                map[row].push(tile::fresh((row, col), tile_types.clone()));
             }
         }
 
-        Self { map, rules }
+        Self {
+            map,
+            rules,
+            //tile_types,
+        }
     }
 
     //TODO: this has a fucking abysmal runtime, please figure out a way to make it better
@@ -228,8 +244,6 @@ impl board {
             .and_then(|e| self.map.get(e))
             .and_then(|f| Some(f[pos.1].clone()));
 
-        //println!("north: {:?}", n.north);
-
         //south
         n.south = pos
             .0
@@ -237,16 +251,12 @@ impl board {
             .and_then(|e| self.map.get(e))
             .and_then(|f| Some(f[pos.1].clone()));
 
-        //println!("south: {:?}", n.south);
-
         //west
         n.west = pos
             .1
             .checked_sub(1)
             .and_then(|e| self.map[pos.0].get(e))
             .and_then(|f| Some(f.clone()));
-
-        //println!("west: {:?}", n.west);
 
         //east
         n.east = pos
@@ -281,7 +291,7 @@ impl board {
         for pos in random_pos {
             //tentatively give our tile this concrete position and give it a char rep
             self[center_tile].t = Some(pos);
-            self[center_tile].rep = tile_type_to_char(pos);
+            //self[center_tile].rep = tile_type_to_char(pos);
 
             //backup neighbors and
             // update neighbors superpositions according to the subposition we are trying
@@ -407,6 +417,36 @@ impl IntoIterator for dir {
     }
 }
 
+//this struct defines the rules for a tile type
+#[derive(PartialEq, Hash, Eq, Debug, Clone)]
+#[allow(non_camel_case_types)]
+struct tile {
+    coords: (usize, usize),
+    //rep: char,
+    //tile only has a type once it has been fully collapsed
+    t: Option<usize>,
+    position: Vec<usize>,
+}
+impl tile {
+    fn fresh(coords: (usize, usize), full: Vec<usize>) -> Self {
+        Self {
+            coords,
+            //rep: 'X',
+            t: None,
+            position: full,
+        }
+    }
+
+    fn entropy(&self) -> usize {
+        if self.t.is_some() {
+            return usize::MAX;
+        } else {
+            return self.position.len();
+        }
+    }
+}
+
+/*
 //lets keep track of our tile types, along with a struct of their adjacency rules
 #[derive(PartialEq, Hash, Eq, Debug, Clone, Copy)]
 #[allow(non_camel_case_types)]
@@ -426,51 +466,6 @@ enum tile_type {
     DOWN_RIGHT_ROUND,
     UP_LEFT_ROUND,
     UP_RIGHT_ROUND,
-}
-
-//this struct defines the rules for a tile type
-#[derive(PartialEq, Hash, Eq, Debug, Clone)]
-#[allow(non_camel_case_types)]
-struct tile {
-    coords: (usize, usize),
-    rep: char,
-    //tile only has a type once it has been fully collapsed
-    t: Option<tile_type>,
-    position: Vec<tile_type>,
-}
-impl tile {
-    fn fresh(coords: (usize, usize)) -> Self {
-        Self {
-            coords,
-            rep: 'X',
-            t: None,
-            position: vec![
-                tile_type::HORIZ_BAR,
-                tile_type::VERT_BAR,
-                tile_type::DOWN_RIGHT,
-                tile_type::DOWN_LEFT,
-                tile_type::UP_LEFT,
-                tile_type::UP_RIGHT,
-                tile_type::VERT_RIGHT,
-                tile_type::VERT_LEFT,
-                tile_type::HORIZ_DOWN,
-                tile_type::HORIZ_UP,
-                tile_type::CROSS,
-                tile_type::DOWN_LEFT_ROUND,
-                tile_type::DOWN_RIGHT_ROUND,
-                tile_type::UP_LEFT_ROUND,
-                tile_type::UP_RIGHT_ROUND,
-            ],
-        }
-    }
-
-    fn entropy(&self) -> usize {
-        if self.t.is_some() {
-            return usize::MAX;
-        } else {
-            return self.position.len();
-        }
-    }
 }
 
 //takes a unicode char, and out
@@ -514,3 +509,4 @@ fn tile_type_to_char(t: tile_type) -> char {
         tile_type::UP_RIGHT_ROUND => '╰',
     };
 }
+*/
