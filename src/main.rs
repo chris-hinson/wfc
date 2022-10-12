@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::env;
 use std::ops::Index;
 use std::ops::IndexMut;
+use std::thread;
 use std::{fs::File, io::Read};
 
 use rand::thread_rng;
@@ -123,17 +124,24 @@ fn main() {
         println!("{:?}: {:?}", k, v);
     }*/
 
-    let solvable = board.collapse(board.chose_tile_to_collapse());
-    println!("solved? {solvable:?}");
+    let builder = thread::Builder::new().stack_size(4194304);
 
-    println!("\n");
-    for row in &board.map {
-        for c in row {
-            //print!("{}", char::from_digit(c.t.unwrap() as u32).unwrap());
-            print!("{}", char::from_u32(c.t.unwrap() as u32).unwrap());
-        }
-        print!("\n")
-    }
+    let handler = builder
+        .spawn(move || {
+            let solvable = board.collapse(board.chose_tile_to_collapse());
+            println!("solved? {solvable:?}");
+
+            println!("\n");
+            for row in &board.map {
+                for c in row {
+                    print!("{}", char::from_u32(c.t.unwrap() as u32).unwrap());
+                }
+                print!("\n")
+            }
+        })
+        .unwrap();
+
+    handler.join().unwrap();
 
     //println!("{:?}", board.map);
 }
